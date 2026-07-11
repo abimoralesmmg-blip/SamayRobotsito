@@ -423,13 +423,19 @@ def get_history():
 # ============================================================
 # 10. INICIALIZACIÓN
 # ============================================================
+# ============================================================
+# 10. INICIALIZACIÓN GLOBAL (Para producción y local)
+# ============================================================
+# Al estar fuera del 'if __name__', Gunicorn sí ejecutará esto al arrancar
+with app.app_context():
+    db.create_all()
+    migrar_base_datos()
+
+load_models()
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-        migrar_base_datos()
-    load_models()
     print("="*50)
-    print("🦷 SamayDent IA - Servidor v12.17 (Solo corrección de cuadrantes)")
+    print("🦷 SamayDent IA - Servidor v12.18 (Modelos en Producción)")
     print("🌐 http://127.0.0.1:5000")
     print("="*50)
     app.run(debug=True, host='0.0.0.0', port=5000)
