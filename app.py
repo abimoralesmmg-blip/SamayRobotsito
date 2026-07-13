@@ -473,8 +473,9 @@ with app.app_context():
 load_models()
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))  # Toma el puerto de Railway o usa 5000 por defecto
     print("="*50)
     print("🦷 SamayDent IA - Servidor v12.18 (Modelos en Producción)")
-    print("🌐 http://127.0.0.1:5000")
+    print(f"🌐 http://0.0.0.0:{port}")
     print("="*50)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=port)  # debug=False en producción
