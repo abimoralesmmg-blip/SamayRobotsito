@@ -1,4 +1,4 @@
-import requests 
+import requests
 import os
 import cv2
 import numpy as np
@@ -26,20 +26,15 @@ app.config['SECRET_KEY'] = 'samaydent-secret-key-2026'
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # ---------- CONFIGURACIÓN DE BASE DE DATOS ----------
-# Si existe la variable de entorno DATABASE_URL (en Railway), usamos PostgreSQL
-# Si no, usamos SQLite local (para desarrollo)
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
-    # Railway proporciona DATABASE_URL con 'postgres://', pero SQLAlchemy requiere 'postgresql://'
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url.replace("postgres://", "postgresql://", 1)
 else:
-    # Modo local: creamos la carpeta database si no existe
     os.makedirs(os.path.join(BASE_DIR, 'database'), exist_ok=True)
     DB_PATH = os.path.join(BASE_DIR, "database", "samaydent.db")
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_PATH}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# -----------------------------------------------------
 
 CORS(app)
 db = SQLAlchemy(app)
@@ -78,7 +73,7 @@ def load_models():
     for name, filename in model_files.items():
         path = os.path.join(BASE_DIR, 'models', filename)
         if os.path.exists(path):
-            MODELS[name] = YOLO(path)
+            MODELS[name] = YOLO(path, task='detect')  # Cargar con task='detect'
             print(f"✅ Modelo '{name}' cargado desde {path}")
         else:
             print(f"⚠️ Modelo '{name}' NO encontrado en {path}")
@@ -114,7 +109,6 @@ def load_user(user_id):
 # 5. MIGRACIÓN DE COLUMNA 'name'
 # ============================================================
 def migrar_base_datos():
-    # Solo ejecutar en modo SQLite (local)
     if not os.environ.get('DATABASE_URL'):
         import sqlite3
         conn = sqlite3.connect(DB_PATH)
@@ -126,8 +120,9 @@ def migrar_base_datos():
             conn.commit()
             print("✅ Columna 'name' añadida a la tabla user.")
         conn.close()
+
 # ============================================================
-# 6. CORRECCIÓN DE CUADRANTES (solo primer dígito)
+# 6. CORRECCIÓN DE CUADRANTES
 # ============================================================
 def corregir_cuadrantes_por_posicion(dientes, img_width, img_height):
     if not dientes:
@@ -173,7 +168,7 @@ def corregir_cuadrantes_por_posicion(dientes, img_width, img_height):
     return dientes
 
 # ============================================================
-# 7. ASIGNAR NOMBRE AL DIENTE (basado en el número, sin modificar)
+# 7. ASIGNAR NOMBRE AL DIENTE
 # ============================================================
 def asignar_nombres_dientes(dientes):
     for d in dientes:
@@ -189,7 +184,7 @@ def asignar_nombres_dientes(dientes):
     return dientes
 
 # ============================================================
-# 8. PROCESAMIENTO DE IMÁGENES
+# 8. PROCESAMIENTO DE IMÁGENES (con redimensionado para ahorrar memoria)
 # ============================================================
 def extraer_codigo_fdi(clase_id):
     return MAPEO_FDI_POR_ID.get(clase_id, str(clase_id))
@@ -203,11 +198,20 @@ def procesar_unificado(image_data):
         img_array = np.array(img_pil)
         h, w = img_array.shape[:2]
 
+        # REDIMENSIONAR A 640px para ahorrar memoria en Railway
+        MAX_SIZE = 640
+        if h > MAX_SIZE or w > MAX_SIZE:
+            scale = MAX_SIZE / max(h, w)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            img_array = cv2.resize(img_array, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            h, w = img_array.shape[:2]  # actualizar dimensiones
+
         # 1. DETECCIÓN DE DIENTES
         dientes = []
         model_d = MODELS.get('nomenclatura')
         if model_d:
-            res = model_d.predict(img_array, conf=0.35, verbose=False)[0]
+            res = model_d.predict(img_array, conf=0.35, verbose=False, device='cpu')[0]
             for box in res.boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 clase_id = int(box.cls[0])
@@ -217,17 +221,17 @@ def procesar_unificado(image_data):
                     'clase_id': clase_id
                 })
 
-        # 2. CORREGIR CUADRANTES (solo primer dígito)
+        # 2. CORREGIR CUADRANTES
         dientes = corregir_cuadrantes_por_posicion(dientes, w, h)
 
-        # 3. ASIGNAR NOMBRES (basados en el número del diente, que no se modifica)
+        # 3. ASIGNAR NOMBRES
         dientes = asignar_nombres_dientes(dientes)
 
         # 4. DETECCIÓN DE PATOLOGÍAS
         patologias = []
         model_p = MODELS.get('patologias')
         if model_p:
-            res_p = model_p.predict(img_array, conf=0.20, iou=0.4, augment=True, verbose=False)[0]
+            res_p = model_p.predict(img_array, conf=0.20, iou=0.4, augment=True, verbose=False, device='cpu')[0]
             for box in res_p.boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 clase_id = int(box.cls[0])
@@ -272,8 +276,13 @@ def procesar_unificado(image_data):
                 'texto': f"Pieza {fdi} ({nombre_diente}): {', '.join(unique_pats)}"
             })
 
+        # Convertir la imagen procesada (ya redimensionada) a base64 para devolver
+        _, img_encoded = cv2.imencode('.jpg', img_array[:, :, ::-1])  # RGB a BGR para OpenCV
+        img_bytes_redim = img_encoded.tobytes()
+        img_base64 = base64.b64encode(img_bytes_redim).decode('utf-8')
+
         return {
-            'imagen_original': base64.b64encode(img_bytes).decode('utf-8'),
+            'imagen_original': img_base64,
             'dientes': dientes,
             'patologias': patologias,
             'hallazgos': hallazgos
@@ -284,34 +293,27 @@ def procesar_unificado(image_data):
         traceback.print_exc()
         return None
 
-
 # ============================================================
-# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT (NUEVO)
+# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT (NUEVA URL)
 # ============================================================
-def enviar_reporte_al_cubo(lista_de_hallazgos):
+def enviar_hallazgos_a_cubo(texto_hallazgos):
     """
-    Esta función toma los resultados de la radiografía y los manda al cubo.
-    'lista_de_hallazgos' puede ser un string con el resumen de la imagen.
+    Envía el resumen de hallazgos al endpoint del cubo/robot usando Cloudflare.
     """
-    # 1. ⚠️ CAMBIA ESTA IP por la IP REAL de tu cubo en la red local
-    URL_FLASK_CUBO = "http://10.33.61.1:5000/recibir_hallazgos_web"
-    
-    # 2. Creamos el paquete de datos (JSON) con el formato que espera el servidor
-    paquete_datos = {
-        "texto_hallazgos": lista_de_hallazgos
-    }
-    
+    url = "https://ended-stomach-peripherals-evaluations.trycloudflare.com/recibir_hallazgos_web"
     try:
-        # 3. Enviamos los datos por un POST veloz
-        respuesta = requests.post(URL_FLASK_CUBO, json=paquete_datos, timeout=5)
-        
-        if respuesta.status_code == 200:
-            print("¡Éxito! Los hallazgos de la radiografía ya están en el cubo.")
+        response = requests.post(
+            url,
+            json={"texto_hallazgos": texto_hallazgos},
+            timeout=10
+        )
+        if response.status_code == 200:
+            print("✅ Hallazgos enviados al cubo exitosamente.")
         else:
-            print(f"Error del servidor Flask: Código {respuesta.status_code}")
-            
+            print(f"⚠️ Error al enviar al cubo: {response.status_code} - {response.text}")
     except requests.exceptions.RequestException as e:
-        print(f"No se pudo conectar con el cubo. Verifica que audio.py esté ejecutándose: {e}")
+        print(f"❌ No se pudo conectar al cubo: {e}")
+
 # ============================================================
 # 9. RUTAS
 # ============================================================
@@ -333,6 +335,7 @@ def predict():
     if not res:
         return jsonify({'success': False, 'error': 'Error procesando la imagen'}), 500
 
+    # Guardar en historial
     historial = DiagnosticHistory(
         user_id=current_user.id,
         model_used=model_type,
@@ -342,17 +345,13 @@ def predict():
     db.session.commit()
 
     res['success'] = True
-# ============================================================
-# 9.1 ENVIO AL ROBOT
-# ============================================================  
+
+    # --- ENVÍO AL ROBOT (CUBO) ---
     hallazgos = res.get('hallazgos', [])
     if hallazgos:
-        # Si quieres enviar el texto resumido, puedes hacerlo así:
         texto_resumen = "\n".join([h.get('texto', '') for h in hallazgos])
-        enviar_reporte_al_cubo(texto_resumen)
-        # O si prefieres enviar la lista completa de hallazgos (estructurada):
-        # enviar_reporte_al_cubo(hallazgos)  # <-- así se envía la lista de diccionarios
-
+        enviar_hallazgos_a_cubo(texto_resumen)   # <--- AQUÍ se usa la nueva función
+    # ---------------------------------
 
     return jsonify(res)
 
@@ -461,11 +460,9 @@ def get_history():
         } for h in historial]
     })
 
-
 # ============================================================
-# 10. INICIALIZACIÓN GLOBAL (Para producción y local)
+# 10. INICIALIZACIÓN GLOBAL (para producción)
 # ============================================================
-# Al estar fuera del 'if __name__', Gunicorn sí ejecutará esto al arrancar
 with app.app_context():
     db.create_all()
     migrar_base_datos()
@@ -473,7 +470,7 @@ with app.app_context():
 load_models()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))  # Toma el puerto de Railway o usa 5000 por defecto
+    port = int(os.environ.get('PORT', 5000))
     print("="*50)
     print("🦷 SamayDent IA - Servidor v12.18 (Modelos en Producción)")
     print(f"🌐 http://0.0.0.0:{port}")
