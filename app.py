@@ -1,3 +1,4 @@
+import requests 
 import os
 import cv2
 import numpy as np
@@ -283,6 +284,34 @@ def procesar_unificado(image_data):
         traceback.print_exc()
         return None
 
+
+# ============================================================
+# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT (NUEVO)
+# ============================================================
+def enviar_reporte_al_cubo(lista_de_hallazgos):
+    """
+    Esta función toma los resultados de la radiografía y los manda al cubo.
+    'lista_de_hallazgos' puede ser un string con el resumen de la imagen.
+    """
+    # 1. ⚠️ CAMBIA ESTA IP por la IP REAL de tu cubo en la red local
+    URL_FLASK_CUBO = "http://10.33.61.1:5000/recibir_hallazgos_web"
+    
+    # 2. Creamos el paquete de datos (JSON) con el formato que espera el servidor
+    paquete_datos = {
+        "texto_hallazgos": lista_de_hallazgos
+    }
+    
+    try:
+        # 3. Enviamos los datos por un POST veloz
+        respuesta = requests.post(URL_FLASK_CUBO, json=paquete_datos, timeout=5)
+        
+        if respuesta.status_code == 200:
+            print("¡Éxito! Los hallazgos de la radiografía ya están en el cubo.")
+        else:
+            print(f"Error del servidor Flask: Código {respuesta.status_code}")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"No se pudo conectar con el cubo. Verifica que audio.py esté ejecutándose: {e}")
 # ============================================================
 # 9. RUTAS
 # ============================================================
@@ -313,6 +342,18 @@ def predict():
     db.session.commit()
 
     res['success'] = True
+# ============================================================
+# 9.1 ENVIO AL ROBOT
+# ============================================================  
+    hallazgos = res.get('hallazgos', [])
+    if hallazgos:
+        # Si quieres enviar el texto resumido, puedes hacerlo así:
+        texto_resumen = "\n".join([h.get('texto', '') for h in hallazgos])
+        enviar_reporte_al_cubo(texto_resumen)
+        # O si prefieres enviar la lista completa de hallazgos (estructurada):
+        # enviar_reporte_al_cubo(hallazgos)  # <-- así se envía la lista de diccionarios
+
+
     return jsonify(res)
 
 @app.route('/api/register', methods=['POST'])
@@ -420,9 +461,7 @@ def get_history():
         } for h in historial]
     })
 
-# ============================================================
-# 10. INICIALIZACIÓN
-# ============================================================
+
 # ============================================================
 # 10. INICIALIZACIÓN GLOBAL (Para producción y local)
 # ============================================================
