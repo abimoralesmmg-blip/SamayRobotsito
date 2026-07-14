@@ -300,7 +300,7 @@ def enviar_hallazgos_a_cubo(texto_hallazgos):
     """
     Envía el resumen de hallazgos al endpoint del cubo/robot usando Cloudflare.
     """
-    url = "https://participants-declared-roles-tucson.trycloudflare.com"
+    url = "https://steadying-dwindle-spirited.ngrok-free.dev/"
     try:
         response = requests.post(
             url,
