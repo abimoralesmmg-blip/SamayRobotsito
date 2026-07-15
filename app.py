@@ -293,27 +293,56 @@ def procesar_unificado(image_data):
         traceback.print_exc()
         return None
 
+# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT (CORREGIDO)
 # ============================================================
-# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT
-# ============================================================
-# ⚠️ CAMBIA ESTA URL POR LA IP REAL DE TU ROBOT O SU DOMINIO
-URL_ROBOT = "https://steadying-dwindle-spirited.ngrok-free.dev/"
+# Usamos tu URL activa de Ngrok agregando el endpoint que recibe los datos
+URL_ROBOT = "https://steadying-dwindle-spirited.ngrok-free.dev/recibir_hallazgos_web"
 
 def enviar_reporte_al_cubo(lista_estructurada):
     """
-    Envía una lista estructurada de hallazgos al robot/cubo.
-    lista_estructurada: lista de diccionarios con 'piece', 'name', 'pathologies'
+    Toma la lista estructurada de diccionarios de la web, la convierte
+    en un hermoso texto hablado en lenguaje natural, y la envía al cubo.
     """
+    if not lista_estructurada:
+        return
+
     try:
+        # 1. Convertimos la lista estructurada en un párrafo fluido de lenguaje natural
+        piezas_texto = []
+        for d in lista_estructurada:
+            fdi = d.get('fdi') or d.get('piece')
+            nombre = d.get('nombre') or d.get('name', 'diente')
+            patologias = d.get('patologias', [])
+            
+            if patologias:
+                patologias_str = ", ".join(patologias)
+                piezas_texto.append(f"la pieza {fdi}, que es un {nombre.lower()} con {patologias_str}")
+            else:
+                piezas_texto.append(f"la pieza {fdi}, que corresponde a un {nombre.lower()}")
+        
+        # Unimos las frases con buena gramática castellana
+        texto_discurso = "He analizado los resultados de tu radiografía dental. Logré identificar: "
+        if len(piezas_texto) > 1:
+            texto_discurso += ", ".join(piezas_texto[:-1]) + " y " + piezas_texto[-1] + "."
+        elif piezas_texto:
+            texto_discurso += piezas_texto[0] + "."
+        else:
+            texto_discurso = "No se detectaron piezas dentales o hallazgos en la radiografía."
+            
+        texto_discurso += " He sincronizado estos resultados en mi memoria para cuando gustes consultarme."
+
+        # 2. Enviamos el texto bajo la clave que espera 'robot_Samay.py'
         response = requests.post(
             URL_ROBOT,
-            json={"hallazgos": lista_estructurada},  # Enviamos la lista estructurada
+            json={"texto_hallazgos": texto_discurso},  # Clave exacta que lee el robot
             timeout=10
         )
+        
         if response.status_code == 200:
-            print("✅ Hallazgos enviados al cubo exitosamente.")
+            print("✅ Hallazgos convertidos a texto y enviados al cubo exitosamente.")
         else:
             print(f"⚠️ Error al enviar al cubo: {response.status_code} - {response.text}")
+            
     except requests.exceptions.RequestException as e:
         print(f"❌ No se pudo conectar al cubo: {e}")
 
