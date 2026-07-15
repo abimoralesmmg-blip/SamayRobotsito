@@ -73,7 +73,7 @@ def load_models():
     for name, filename in model_files.items():
         path = os.path.join(BASE_DIR, 'models', filename)
         if os.path.exists(path):
-            MODELS[name] = YOLO(path, task='detect')  # Cargar con task='detect'
+            MODELS[name] = YOLO(path, task='detect')
             print(f"✅ Modelo '{name}' cargado desde {path}")
         else:
             print(f"⚠️ Modelo '{name}' NO encontrado en {path}")
@@ -205,7 +205,7 @@ def procesar_unificado(image_data):
             new_w = int(w * scale)
             new_h = int(h * scale)
             img_array = cv2.resize(img_array, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            h, w = img_array.shape[:2]  # actualizar dimensiones
+            h, w = img_array.shape[:2]
 
         # 1. DETECCIÓN DE DIENTES
         dientes = []
@@ -276,8 +276,8 @@ def procesar_unificado(image_data):
                 'texto': f"Pieza {fdi} ({nombre_diente}): {', '.join(unique_pats)}"
             })
 
-        # Convertir la imagen procesada (ya redimensionada) a base64 para devolver
-        _, img_encoded = cv2.imencode('.jpg', img_array[:, :, ::-1])  # RGB a BGR para OpenCV
+        # Convertir la imagen procesada a base64 para devolver
+        _, img_encoded = cv2.imencode('.jpg', img_array[:, :, ::-1])
         img_bytes_redim = img_encoded.tobytes()
         img_base64 = base64.b64encode(img_bytes_redim).decode('utf-8')
 
@@ -294,17 +294,20 @@ def procesar_unificado(image_data):
         return None
 
 # ============================================================
-# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT (NUEVA URL)
+# 8.5 COMUNICACIÓN CON EL CUBO/ROBOT
 # ============================================================
-def enviar_hallazgos_a_cubo(texto_hallazgos):
+# ⚠️ CAMBIA ESTA URL POR LA IP REAL DE TU ROBOT O SU DOMINIO
+URL_ROBOT = "https://steadying-dwindle-spirited.ngrok-free.dev/"
+
+def enviar_reporte_al_cubo(lista_estructurada):
     """
-    Envía el resumen de hallazgos al endpoint del cubo/robot usando Cloudflare.
+    Envía una lista estructurada de hallazgos al robot/cubo.
+    lista_estructurada: lista de diccionarios con 'piece', 'name', 'pathologies'
     """
-    url = "https://steadying-dwindle-spirited.ngrok-free.dev/"
     try:
         response = requests.post(
-            url,
-            json={"texto_hallazgos": texto_hallazgos},
+            URL_ROBOT,
+            json={"hallazgos": lista_estructurada},  # Enviamos la lista estructurada
             timeout=10
         )
         if response.status_code == 200:
@@ -346,12 +349,24 @@ def predict():
 
     res['success'] = True
 
-    # --- ENVÍO AL ROBOT (CUBO) ---
+    # ============================================================
+    # 9.1 ENVIO AL ROBOT (dentro de predict)
+    # ============================================================
     hallazgos = res.get('hallazgos', [])
     if hallazgos:
-        texto_resumen = "\n".join([h.get('texto', '') for h in hallazgos])
-        enviar_hallazgos_a_cubo(texto_resumen)   # <--- AQUÍ se usa la nueva función
-    # ---------------------------------
+        # Creamos una lista limpia para mandar al robot
+        lista_robot = []
+        for h in hallazgos:
+            if h.get('tipo') == 'diente':
+                lista_robot.append({
+                    "piece": h.get('fdi'),
+                    "name": h.get('nombre'),
+                    "pathologies": h.get('patologias', [])
+                })
+        
+        # Enviamos la lista de diccionarios estructurada al robot
+        enviar_reporte_al_cubo(lista_robot)
+    # ============================================================
 
     return jsonify(res)
 
@@ -472,7 +487,7 @@ load_models()
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print("="*50)
-    print("🦷 SamayDent IA - Servidor v12.18 (Modelos en Producción)")
+    print("🦷 SamayDent IA - Servidor v12.21 (Envío al robot estructurado)")
     print(f"🌐 http://0.0.0.0:{port}")
     print("="*50)
-    app.run(debug=False, host='0.0.0.0', port=port)  # debug=False en producción
+    app.run(debug=False, host='0.0.0.0', port=port)
